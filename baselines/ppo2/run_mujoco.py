@@ -33,7 +33,7 @@ def train(env_id, num_timesteps, seed):
                        ent_coef=0.0,
                        lr=3e-4,
                        cliprange=0.2,
-                       save_interval=10000,
+                       save_interval=1000,
                        total_timesteps=num_timesteps)
 
     return model, env
