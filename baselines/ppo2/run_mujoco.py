@@ -45,7 +45,7 @@ def main():
 
     print("123")
 
-    if args.play:
+    if 1:
         logger.log("Running trained model")
         obs = np.zeros((env.num_envs,) + env.observation_space.shape)
         obs[:] = env.reset()
