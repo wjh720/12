@@ -19,7 +19,6 @@ setup(name='baselines',
           'progressbar2',
           'mpi4py',
           'cloudpickle',
-          'tensorflow>=1.4.0',
           'click',
           'opencv-python'
       ],
