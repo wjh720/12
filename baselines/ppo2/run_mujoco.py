@@ -34,7 +34,7 @@ def train(env_id, num_timesteps, seed):
                        lr=3e-4,
                        cliprange=0.2,
                        save_interval=3,
-                       load_path = "/tmp/openai-2018-05-29-21-51-25-185315/checkpoints/00048",
+                       load_path = "/tmp/openai-2018-05-29-21-51-25-185315/checkpoints/00048/",
                        total_timesteps=num_timesteps)
 
     return model, env
