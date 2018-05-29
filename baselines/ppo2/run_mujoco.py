@@ -43,6 +43,8 @@ def main():
     logger.configure()
     model, env = train(args.env, num_timesteps=args.num_timesteps, seed=args.seed)
 
+    print("123")
+
     if args.play:
         logger.log("Running trained model")
         obs = np.zeros((env.num_envs,) + env.observation_space.shape)
