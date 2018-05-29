@@ -33,6 +33,7 @@ def train(env_id, num_timesteps, seed):
                        ent_coef=0.0,
                        lr=3e-4,
                        cliprange=0.2,
+                       save_interval=10000,
                        total_timesteps=num_timesteps)
 
     return model, env
@@ -42,8 +43,6 @@ def main():
     args = mujoco_arg_parser().parse_args()
     logger.configure()
     model, env = train(args.env, num_timesteps=args.num_timesteps, seed=args.seed)
-
-    print("123")
 
     if 1:
         logger.log("Running trained model")
