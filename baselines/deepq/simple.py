@@ -6,12 +6,15 @@ import zipfile
 import cloudpickle
 import numpy as np
 
-import gym
 import baselines.common.tf_util as U
+from baselines.common.tf_util import load_state, save_state
 from baselines import logger
 from baselines.common.schedules import LinearSchedule
+from baselines.common.input import observation_input
+
 from baselines import deepq
 from baselines.deepq.replay_buffer import ReplayBuffer, PrioritizedReplayBuffer
+from baselines.deepq.utils import ObservationInput
 
 
 class ActWrapper(object):
@@ -32,7 +35,7 @@ class ActWrapper(object):
                 f.write(model_data)
 
             zipfile.ZipFile(arc_path, 'r', zipfile.ZIP_DEFLATED).extractall(td)
-            U.load_state(os.path.join(td, "model"))
+            load_state(os.path.join(td, "model"))
 
         return ActWrapper(act, act_params)
 
@@ -45,7 +48,7 @@ class ActWrapper(object):
             path = os.path.join(logger.get_dir(), "model.pkl")
 
         with tempfile.TemporaryDirectory() as td:
-            U.save_state(os.path.join(td, "model"))
+            save_state(os.path.join(td, "model"))
             arc_name = os.path.join(td, "packed.zip")
             with zipfile.ZipFile(arc_name, 'w') as zipf:
                 for root, dirs, files in os.walk(td):
@@ -87,6 +90,7 @@ def learn(env,
           batch_size=32,
           print_freq=100,
           checkpoint_freq=10000,
+          checkpoint_path=None,
           learning_starts=1000,
           gamma=1.0,
           target_network_update_freq=500,
@@ -169,9 +173,9 @@ def learn(env,
 
     # capture the shape outside the closure so that the env object is not serialized
     # by cloudpickle when serializing make_obs_ph
-    observation_space_shape = env.observation_space.shape
+
     def make_obs_ph(name):
-        return U.BatchInput(observation_space_shape, name=name)
+        return ObservationInput(env.observation_space, name=name)
 
     act, train, update_target, debug = deepq.build_train(
         make_obs_ph=make_obs_ph,
@@ -215,9 +219,17 @@ def learn(env,
     saved_mean_reward = None
     obs = env.reset()
     reset = True
+
     with tempfile.TemporaryDirectory() as td:
-        model_saved = False
+        td = checkpoint_path or td
+
         model_file = os.path.join(td, "model")
+        model_saved = False
+        if tf.train.latest_checkpoint(td) is not None:
+            load_state(model_file)
+            logger.log('Loaded model from {}'.format(model_file))
+            model_saved = True
+
         for t in range(max_timesteps):
             if callback is not None:
                 if callback(locals(), globals()):
@@ -283,12 +295,12 @@ def learn(env,
                     if print_freq is not None:
                         logger.log("Saving model due to mean reward increase: {} -> {}".format(
                                    saved_mean_reward, mean_100ep_reward))
-                    U.save_state(model_file)
+                    save_state(model_file)
                     model_saved = True
                     saved_mean_reward = mean_100ep_reward
         if model_saved:
             if print_freq is not None:
                 logger.log("Restored model with mean reward: {}".format(saved_mean_reward))
-            U.load_state(model_file)
+            load_state(model_file)
 
     return act

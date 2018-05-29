@@ -7,6 +7,7 @@ import tensorflow as tf
 from baselines import logger
 from collections import deque
 from baselines.common import explained_variance
+from baselines.common.runners import AbstractEnvRunner
 
 class Model(object):
     def __init__(self, *, policy, ob_space, ac_space, nbatch_act, nbatch_train,
@@ -51,7 +52,7 @@ class Model(object):
         def train(lr, cliprange, obs, returns, masks, actions, values, neglogpacs, states=None):
             advs = returns - values
             advs = (advs - advs.mean()) / (advs.std() + 1e-8)
-            td_map = {train_model.X:obs, A:actions, ADV:advs, R:returns, LR:lr, 
+            td_map = {train_model.X:obs, A:actions, ADV:advs, R:returns, LR:lr,
                     CLIPRANGE:cliprange, OLDNEGLOGPAC:neglogpacs, OLDVPRED:values}
             if states is not None:
                 td_map[train_model.S] = states
@@ -72,6 +73,7 @@ class Model(object):
             for p, loaded_p in zip(params, loaded_params):
                 restores.append(p.assign(loaded_p))
             sess.run(restores)
+            # If you want to load weights, also save/load observation scaling inside VecNormalize
 
         self.train = train
         self.train_model = train_model
@@ -83,19 +85,12 @@ class Model(object):
         self.load = load
         tf.global_variables_initializer().run(session=sess) #pylint: disable=E1101
 
-class Runner(object):
+class Runner(AbstractEnvRunner):
 
     def __init__(self, *, env, model, nsteps, gamma, lam):
-        self.env = env
-        self.model = model
-        nenv = env.num_envs
-        self.obs = np.zeros((nenv,) + env.observation_space.shape, dtype=model.train_model.X.dtype.name)
-        self.obs[:] = env.reset()
-        self.gamma = gamma
+        super().__init__(env=env, model=model, nsteps=nsteps)
         self.lam = lam
-        self.nsteps = nsteps
-        self.states = model.initial_state
-        self.dones = [False for _ in range(nenv)]
+        self.gamma = gamma
 
     def run(self):
         mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, mb_neglogpacs = [],[],[],[],[],[]
@@ -107,7 +102,7 @@ class Runner(object):
             mb_actions.append(actions)
             mb_values.append(values)
             mb_neglogpacs.append(neglogpacs)
-            mb_dones.append(self.dones)            
+            mb_dones.append(self.dones)
             self.obs[:], rewards, self.dones, infos = self.env.step(actions)
             for info in infos:
                 maybeepinfo = info.get('episode')
@@ -124,7 +119,7 @@ class Runner(object):
         #discount/bootstrap off value fn
         mb_returns = np.zeros_like(mb_rewards)
         mb_advs = np.zeros_like(mb_rewards)
-        lastgaelam = 0        
+        lastgaelam = 0
         for t in reversed(range(self.nsteps)):
             if t == self.nsteps - 1:
                 nextnonterminal = 1.0 - self.dones
@@ -135,7 +130,7 @@ class Runner(object):
             delta = mb_rewards[t] + self.gamma * nextvalues * nextnonterminal - mb_values[t]
             mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
         mb_returns = mb_advs + mb_values
-        return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)), 
+        return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)),
             mb_states, epinfos)
 # obs, returns, masks, actions, values, neglogpacs, states = runner.run()
 def sf01(arr):
@@ -150,10 +145,10 @@ def constfn(val):
         return val
     return f
 
-def learn(*, policy, env, nsteps, total_timesteps, ent_coef, lr, 
-            vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95, 
+def learn(*, policy, env, nsteps, total_timesteps, ent_coef, lr,
+            vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95,
             log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
-            save_interval=0):
+            save_interval=0, load_path=None):
 
     if isinstance(lr, float): lr = constfn(lr)
     else: assert callable(lr)
@@ -167,7 +162,7 @@ def learn(*, policy, env, nsteps, total_timesteps, ent_coef, lr,
     nbatch = nenvs * nsteps
     nbatch_train = nbatch // nminibatches
 
-    make_model = lambda : Model(policy=policy, ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=nbatch_train, 
+    make_model = lambda : Model(policy=policy, ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=nbatch_train,
                     nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
                     max_grad_norm=max_grad_norm)
     if save_interval and logger.get_dir():
@@ -175,6 +170,8 @@ def learn(*, policy, env, nsteps, total_timesteps, ent_coef, lr,
         with open(osp.join(logger.get_dir(), 'make_model.pkl'), 'wb') as fh:
             fh.write(cloudpickle.dumps(make_model))
     model = make_model()
+    if load_path is not None:
+        model.load(load_path)
     runner = Runner(env=env, model=model, nsteps=nsteps, gamma=gamma, lam=lam)
 
     epinfobuf = deque(maxlen=100)
@@ -214,7 +211,7 @@ def learn(*, policy, env, nsteps, total_timesteps, ent_coef, lr,
                     mbflatinds = flatinds[mbenvinds].ravel()
                     slices = (arr[mbflatinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
                     mbstates = states[mbenvinds]
-                    mblossvals.append(model.train(lrnow, cliprangenow, *slices, mbstates))            
+                    mblossvals.append(model.train(lrnow, cliprangenow, *slices, mbstates))
 
         lossvals = np.mean(mblossvals, axis=0)
         tnow = time.time()
@@ -239,6 +236,7 @@ def learn(*, policy, env, nsteps, total_timesteps, ent_coef, lr,
             print('Saving to', savepath)
             model.save(savepath)
     env.close()
+    return model
 
 def safemean(xs):
     return np.nan if len(xs) == 0 else np.mean(xs)
