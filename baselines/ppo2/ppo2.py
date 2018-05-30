@@ -170,6 +170,7 @@ def learn(*, policy, env, nsteps, total_timesteps, ent_coef, lr,
         with open(osp.join(logger.get_dir(), 'make_model.pkl'), 'wb') as fh:
             fh.write(cloudpickle.dumps(make_model))
     model = make_model()
+    print(load_path)
     if load_path is not None:
         print("Load!")
         model.load(load_path)
